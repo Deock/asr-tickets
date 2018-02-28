@@ -1,0 +1,7 @@
+# Ignore paths that contain generated content.
+files/
+sites/*/files
+sites/*/private
+
+# Ignore the settings.php file.
+sites/default/settings.php
