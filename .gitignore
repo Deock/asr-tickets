@@ -1,7 +1,7 @@
 # Ignore paths that contain generated content.
-files/
-sites/*/files
-sites/*/private
+drupal/files/
+drupal/sites/*/files
+drupal/sites/*/private
 
 # Ignore the settings.php file.
-sites/default/settings.php
+drupal/sites/default/settings.php
