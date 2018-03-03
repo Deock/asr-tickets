@@ -36,7 +36,7 @@ class DateTimeComputed extends TypedData {
   /**
    * {@inheritdoc}
    */
-  public function getValue() {
+  public function getValue($langcode = NULL) {
     if ($this->date !== NULL) {
       return $this->date;
     }
