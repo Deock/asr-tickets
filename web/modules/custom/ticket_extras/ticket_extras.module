@@ -1,0 +1,305 @@
+<?php
+
+// Use statements to support hook_entity_field_access.
+use Drupal\Core\Field\FieldDefinitionInterface;
+use Drupal\Core\Session\AccountInterface;
+use Drupal\Core\Field\FieldItemListInterface;
+use Drupal\Core\Access\AccessResult;
+// Use statements to support hook_form_FORM_ID_alter.
+use Drupal\Core\Form\FormStateInterface;
+// Use statements to support hook_entity_presave.
+use Drupal\Core\Entity\EntityInterface;
+
+/**
+ * Implements hook_entity_field_access().
+ *
+ * We want to make sure that fields aren't being seen or edited
+ * by those who shouldn't.
+ */
+function ticket_extras_entity_field_access($operation, FieldDefinitionInterface $field_definition, AccountInterface $account, FieldItemListInterface $items = NULL) {
+  $result = AccessResult::neutral();
+  //kint($admin_roles);
+  if($field_definition->getName() == 'field_ticket_asignado_a'){
+    if($operation == 'edit' && (!in_array('administrator', $account->getRoles()) && !in_array('colaborador', $account->getRoles()))){
+      $result = AccessResult::forbidden();
+    }
+  }
+  
+  if($field_definition->getName() == 'field_ticket_status'){
+    if($operation == 'edit' && (!in_array('administrator', $account->getRoles()) && !in_array('colaborador', $account->getRoles()))){
+      $result = AccessResult::forbidden();
+    }
+  }
+  //return $result->addCacheContexts(['user.role:administrator']);
+  return $result;
+
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ */
+function ticket_extras_form_node_ticket_edit_form_alter(&$form, FormStateInterface &$form_state, $form_id) {
+  //kint($form['field_ticket_status']);
+  //drupal_set_message(t('An error occurred and processing did not complete.'), 'error');
+  $user = \Drupal::currentUser()->getRoles();
+  if(!in_array('administrator', $user)){
+    $form['field_ticket_status']['widget']['#attributes']['disabled'] = 'disabled';
+    $form['field_ticket_asignado_a']['widget']['0']['target_id']['#attributes']['disabled'] = 'disabled';
+  }
+  $form['#validate'][] = 'ticket_extras_node_form_validate';
+}
+
+/**
+ * Custom Validation form for the ticket form.
+ *
+ * Verifies that the field Asigando is set if the ticket's status is -en proceso-.
+ */
+function ticket_extras_node_form_validate($form, FormStateInterface $form_state) {
+  $node = $form_state->getFormObject()->getEntity();
+  $val_status = $node->get('field_ticket_status')->target_id;
+  $val_user_asig = $node->get('field_ticket_asignado_a')->target_id;
+  $x = $form_state->getValue('field_ticket_status');
+  if (!empty($x)){
+   $new_status = $x[0]['target_id'];
+  }
+  if ($node->getType() == 'ticket') {
+    if(!empty($new_status) && $new_status == '2' && is_null($val_user_asig)) {
+      $form_state->setErrorByName('field_ticket_asignado_a', t('Asigne a un usuario para indicar el status del ticket -en proceso-.'));
+    }
+  }
+}
+
+
+
+/**
+ * Implements hook_entity_presave().
+ */
+function ticket_extras_node_presave(EntityInterface $entity) {
+  //ksm($entity);
+  //ksm($entity->bundle());
+  if($entity->bundle() == 'ticket'){
+    $val_status = $entity->get('field_ticket_status')->target_id;
+    $val_user_asig = $entity->get('field_ticket_asignado_a')->target_id;
+    //ksm($val_status);
+    //Alternativa;
+      //$val3 = $entity->field_ticket_status->referencedEntities();
+      //ksm($val3);
+    if(is_null($val_status) && is_null($val_user_asig)){
+      $entity->set('field_ticket_status', ['target_id' => 1]);
+      $name = $entity->get('field_ticket_status')->entity->getName();
+      drupal_set_message(t($name),'warning');
+    } 
+    if(is_null($val_status) && !is_null($val_user_asig)){
+      $entity->set('field_ticket_status', ['target_id' => 2]);
+      $name = $entity->get('field_ticket_status')->entity->getName();
+      drupal_set_message(t($name),'warning');
+      //falta enviar correo de notificación al usuario field_ticket_asignado_a
+    }
+    if(!is_null($val_status) && $val_status == 1 && !is_null($val_user_asig)){
+      $entity->set('field_ticket_status', ['target_id' => 2]);
+      $name = $entity->get('field_ticket_status')->entity->getName();
+      drupal_set_message(t($name),'warning');
+      notification_to_colaboradores($entity, $val_user_asig);
+
+    }
+  }
+}
+
+
+/**
+* Implements hook_mail().
+*/
+/*
+function ticket_extras_mail($key, &$message, $params) {
+ $options = array(
+   'langcode' => $message['langcode'],
+ );
+ switch ($key) {
+   case 'colaborador_notification':
+     $message['from'] = \Drupal::config('system.site')->get('mail');
+      notification_to_colaboradores($entity, $val_user_asig);
+
+    }
+  }
+//}*/
+
+
+/**
+* Implements hook_mail().
+*/
+function ticket_extras_mail($key, &$message, $params) {
+ $options = array(
+   'langcode' => $message['langcode'],
+ );
+ switch ($key) {
+   case 'colaborador_notification':
+     $message['from'] = \Drupal::config('system.site')->get('mail');
+     $message['subject'] = t('Article created: @title', array('@title' => $params['node_title']), $options);
+     $message['body'][] = $params['message'];
+     break;
+   case 'admins_notification':
+     $message['from'] = \Drupal::config('system.site')->get('mail');
+     $message['subject'] = t('New Ticket created: @title', array('@title' => $params['node_title']), $options);
+     $message['body'][] = $params['message'];
+     break;
+ }
+}
+
+
+function ticket_extras_theme() {
+  $theme['col_test'] = [
+    'variables' => ['name' => NULL, 'data' => NULL],
+    'template' => 'colaboradores-body'
+  ];
+  $theme['admins_theme'] = [
+    'variables' => ['data' => NULL, 'admin_data' => NULL],
+    'template' => 'admins-template'
+  ];
+  return $theme;
+}
+
+
+
+function notification_to_colaboradores($entity,$id_email) {
+  $mailManager = \Drupal::service('plugin.manager.mail');
+  $module = 'ticket_extras';
+  $key = 'colaborador_notification'; 
+  // Load the assigned user.
+  $user = \Drupal\user\Entity\User::load($id_email);
+  $to = $user->getEmail();
+  $user_name = $user->getUsername();
+  $user_full_name = $user->field_user_name->value.' '.$user->field_user_ap->value.' '.$user->field_user_am->value;
+  //get the ticket info
+  $ticket_id = $entity->get('field_ticket_id')->value;
+  $date = $entity->getCreatedTime();
+  $ticket_date = \Drupal::service('date.formatter')->format($date, 'custom', 'd-F-Y H:i');
+  $ticket_autor = $entity->getOwner()->getDisplayName();
+  $ticket_author_full_name = $entity->getOwner()->field_user_name->value.' '.$entity->getOwner()->field_user_ap->value.' '.$entity->getOwner()->field_user_am->value;
+  $ticket_author_roles = implode(", ", $entity->getOwner()->getRoles());
+  $ticket_summary = substr($entity->get('body')->value,0,150);
+  $ticket_title = $entity->getTitle();
+  $ticket_nid = $entity->id();
+  // Will output <a href="http://example.com/path-to-my-node" class="this-class"><span>Node Title</span></a>
+  $options = ['absolute' => TRUE, 'attributes' => ['class' => 'node-link']];
+  $node_title = \Drupal\Core\Render\Markup::create('<span>' . $ticket_title . '</span>');
+  $ticket_link = \Drupal\Core\Link::createFromRoute($node_title, 'entity.node.canonical', ['node' => $ticket_nid], $options);
+  // In PHP (outside a render array) use $link_object->toString().
+
+  $vars = array(
+    'ticket_id' => $ticket_id,
+    'ticket_date' => $ticket_date,
+    'ticket_author' => $ticket_autor,
+    'user_assigned_name' => $user_full_name,
+    'ticket_author_full_name' => $ticket_author_full_name,
+    'ticket_author_roles' => $ticket_author_roles,
+    'ticket_summary' => $ticket_summary,
+    'ticket_link' => $ticket_link->toString()
+  );
+
+  $theme_body = array(
+    '#theme' => 'col_test',
+    '#name' => $user_name,
+    '#data' => $vars
+  ); 
+
+  $mail_body = drupal_render($theme_body);
+  $params['message'] = $mail_body;
+  //$params['message'] = $message;
+  $params['node_title'] = '$label';
+  $langcode = \Drupal::currentUser()->getPreferredLangcode();
+  $send = true;
+
+
+  $result = $mailManager->mail($module, $key, $to, $langcode, $params, NULL, $send);
+  if ($entity->getEntityTypeId() !== 'node' || ($entity->getEntityTypeId() === 'node' && $entity->bundle() !== 'ticket')) {
+    return;
+  }
+
+  $user_storage = \Drupal::service('entity_type.manager')->getStorage('user');
+
+  $ids = $user_storage->getQuery()
+    ->condition('status', 1)
+    ->condition('roles', 'administrator')
+    ->execute();
+  //$users = $user_storage->loadMultiple($ids);
+  //ksm($ids);
+  foreach($ids as $id => $values) {
+    $mailManager = \Drupal::service('plugin.manager.mail');
+    $module = 'ticket_extras';
+    $key = 'admins_notification';
+
+    // Load the assigned user.
+    $user = \Drupal\user\Entity\User::load($values);
+    //$to = 'To mail '; // email to be sent to this Email ID
+    $to = $user->getEmail();
+  
+    //  Get the admin information 
+    $user_name = $user->getUsername();
+    $user_full_name = $user->field_user_name->value.' '.$user->field_user_ap->value.' '.$user->field_user_am->value;
+
+    $admin_data = array(
+      'name' => $user_name,
+      'full_name' => $user_full_name
+    );  
+  
+    /**
+      *Get the information to fill the mail
+      */
+  
+    $params['node_title'] = $entity->label();
+    //get the ticket info
+    $ticket_id = $entity->get('field_ticket_id')->value;
+    $date = $entity->getCreatedTime();
+    $ticket_date = \Drupal::service('date.formatter')->format($date, 'custom', 'd-F-Y H:i');
+    $ticket_autor = $entity->getOwner()->getDisplayName();
+    $ticket_author_full_name = $entity->getOwner()->field_user_name->value.' '.$entity->getOwner()->field_user_ap->value.' '.$entity->getOwner()->field_user_am->value;
+    $ticket_author_roles = implode(", ", $entity->getOwner()->getRoles());
+    $ticket_summary = substr($entity->get('body')->value,0,150);
+    $ticket_nid = $entity->id();
+    // Will output <a href="http://example.com/path-to-my-node" class="this-class"><span>Node Title</span></a>
+    $options = ['absolute' => TRUE, 'attributes' => ['class' => 'node-link']];
+    $node_title = \Drupal\Core\Render\Markup::create('<span>' . $params['node_title'] . '</span>');
+    $ticket_link = \Drupal\Core\Link::createFromRoute($node_title, 'entity.node.canonical', ['node' => $ticket_nid], $options);
+    // In PHP (outside a render array) use $link_object->toString().
+
+    $data = array(
+      'ticket_title' => $params['node_title'],
+      'ticket_nid' => $ticket_nid,
+      'ticket_summary' => $ticket_summary,
+      'ticket_author' => $ticket_autor,
+      'ticket_author_full_name' => $ticket_author_full_name,
+      'ticket_date' => $ticket_date,
+      'ticket_id' => $ticket_id,
+      'ticket_author_roles' => $ticket_author_roles,
+      'ticket_link' => $ticket_link->toString()
+    );
+
+    $admins_mail_body = array(
+      '#theme' => 'admins_theme',
+      '#data'  => $data,
+      '#admin_data' => $admin_data
+    );
+
+    $mail_body = drupal_render($admins_mail_body);
+    $params['message'] = $mail_body;
+    $langcode = \Drupal::currentUser()->getPreferredLangcode();
+    $send = true;
+
+    $result = $mailManager->mail($module, $key, $to, $langcode, $params, NULL, $send);
+    if ($result['result'] !== true) {
+      $message = t('There was a problem sending alert email notification to @email for creating ticket @id.', array('@email' => $to, '@id' => $entity->id()));
+      drupal_set_message($message,'error');
+      //drupal dblog
+      \Drupal::logger('ticket_extras alert')->error($message);
+      return;
+    }
+
+    $message = t('An email notification has been sent to @email for creating node @id.', array('@email' => $to, '@id' => $entity->id()));
+    drupal_set_message($message,'status');
+    //drupal dblog
+    \Drupal::logger('ticket_extras alert')->notice($message);
+  }
+}
+
+
+?>

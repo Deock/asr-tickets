@@ -1,0 +1,8 @@
+name: Extras to Tickets
+description: Enable Functions extra to Tickets form
+package: Deock
+
+type: module
+core: 8.x
+
+php: 7.0
