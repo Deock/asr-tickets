@@ -22,3 +22,5 @@
 
 # Ignore .env files as they are personal
 /.env
+#Ignore all node modules of tickets_asr custom theme
+/web/themes/tickets_asr/node_modules
