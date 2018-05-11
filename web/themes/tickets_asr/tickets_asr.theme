@@ -1,0 +1,66 @@
+<?php
+
+/**
+ * @file
+ * Bootstrap sub-theme.
+ *
+ * Place your custom PHP code in this file.
+ */
+
+    function tickets_asr_preprocess_page(&$variables) {
+        if($variables['is_front']){
+          $variables['#attached']['library'][] = 'tickets_asr/test';
+          //$variables['#attached']['library'][] = 'tickets_asr/js/only-front.js';
+      	}
+  	   /* if (\Drupal::service('path.matcher')->isFrontPage()) {
+   		  drupal_set_message('si es front', 'warning');
+          $variables['#attached']['library'][] = 'tickets_asr/js/only-front.js';
+   		}*/
+
+    }
+
+/**
+ * Add a custom meta data tags
+ **/
+function tickets_asr_preprocess_html(&$variables) {
+  
+  $theme_color = [
+    '#tag' => 'meta',
+    '#attributes' => [
+      'name' => 'theme-color',
+      'content' => '#081f3d',
+    ],
+  ];
+  $msapplication_color = [
+    '#tag' => 'meta',
+    '#attributes' => [
+      'name' => 'msapplication-navbutton-color',
+      'content' => '#081f3d',
+    ],
+  ];
+  $apple_capable = [
+    '#tag' => 'meta',
+    '#attributes' => [
+      'name' => 'apple-mobile-web-app-capable',
+      'content' => 'yes',
+    ],
+  ];
+  $apple_status = [
+    '#tag' => 'meta',
+    '#attributes' => [
+      'name' => 'apple-mobile-web-app-status-bar-style',
+      'content' => 'black-translucent',
+    ],
+  ];
+
+  $variables['page']['#attached']['html_head'][] = [$theme_color, 'theme-color'];
+  $variables['page']['#attached']['html_head'][] = [$msapplication_color, 'msapplication-navbutton-color'];
+  $variables['page']['#attached']['html_head'][] = [$apple_capable, 'apple-mobile-web-app-capable'];
+  $variables['page']['#attached']['html_head'][] = [$apple_status, 'black-translucent'];
+  	/*name="theme-color" content="#84db94"
+	<!-- Windows Phone -->
+	<meta name="msapplication-navbutton-color" content="#4285f4">
+	<!-- iOS Safari -->
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">*/
+};
