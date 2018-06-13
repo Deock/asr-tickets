@@ -30,6 +30,16 @@ function ticket_extras_entity_field_access($operation, FieldDefinitionInterface 
       $result = AccessResult::forbidden();
     }
   }
+  
+  if($operation == 'edit' && (!in_array('administrator', $account->getRoles()))){
+    if($field_definition->getName() == 'field_ticket_duration_text'){
+      $result = AccessResult::forbidden();
+    }
+    if($field_definition->getName() == 'field_ticket_end_date'){
+      $result = AccessResult::forbidden();
+    }
+  }
+
   //return $result->addCacheContexts(['user.role:administrator']);
   return $result;
 
@@ -40,12 +50,15 @@ function ticket_extras_entity_field_access($operation, FieldDefinitionInterface 
  */
 function ticket_extras_form_node_ticket_edit_form_alter(&$form, FormStateInterface &$form_state, $form_id) {
   //kint($form['field_ticket_status']);
+  //kint($form['field_ticket_duration_text']);
   //drupal_set_message(t('An error occurred and processing did not complete.'), 'error');
   $user = \Drupal::currentUser()->getRoles();
   if(!in_array('administrator', $user)){
     $form['field_ticket_status']['widget']['#attributes']['disabled'] = 'disabled';
     $form['field_ticket_asignado_a']['widget']['0']['target_id']['#attributes']['disabled'] = 'disabled';
   }
+    $form['field_ticket_duration_text']['widget'][0]['value']['#attributes']['disabled'] = 'disabled';
+    $form['field_ticket_end_date']['widget'][0]['value']['#attributes']['disabled'] = 'disabled';
   $form['#validate'][] = 'ticket_extras_node_form_validate';
 }
 
@@ -83,9 +96,10 @@ function ticket_extras_node_access($node, $op, $account) {
     //return NODE_ACCESS_DENY;
     return AccessResult::forbidden()->cachePerPermissions();
   }
+  else {
+    //return NODE_ACCESS_IGNORE;
+  }
 }
-
-
 
 
 /**
@@ -97,6 +111,9 @@ function ticket_extras_node_presave(EntityInterface $entity) {
   if($entity->bundle() == 'ticket'){
     $val_status = $entity->get('field_ticket_status')->target_id;
     $val_user_asig = $entity->get('field_ticket_asignado_a')->target_id;
+    $val_end_date_field = $entity->get('field_ticket_end_date')->getValue()[0]['value'];
+    $created_date = $entity->getCreatedTime();
+    
     //ksm($val_status);
     //Alternativa;
       //$val3 = $entity->field_ticket_status->referencedEntities();
@@ -117,7 +134,22 @@ function ticket_extras_node_presave(EntityInterface $entity) {
       $name = $entity->get('field_ticket_status')->entity->getName();
       drupal_set_message(t($name),'warning');
       notification_to_colaboradores($entity, $val_user_asig);
-
+    }
+    if(!is_null($val_status) && $val_status == 4 && empty($val_end_date_field)){
+      $end_date = date('Y-m-d\T00:i:s', time());
+      $entity->set('field_ticket_end_date', $end_date);
+      //drupal_set_message($end_date,warning);
+      $created_date = \Drupal::service('date.formatter')->format($created_date, custom, 'Y-m-d\T00:i:s');// enter date format in $format.
+      //drupal_set_message($created_date,warning);
+      
+      $start_date = new DateTime($created_date);
+      $end_date = new DateTime($end_date);
+      $interval= $start_date->diff($end_date);
+      //drupal_set_message($interval,error);
+      $duration = $interval->format('%Y years %m months %d days %H hours %i minutes %s seconds');
+      drupal_set_message($duration,warning);
+      $entity->set('field_ticket_duration_text', $duration);
+         
     }
   }
 }
