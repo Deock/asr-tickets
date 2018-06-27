@@ -10,19 +10,33 @@
  * as a part of the module.
  *
  * Overriding mail handling in Drupal to make SMTP the default
- * transport layer, requires to change the 'system.mail.interface'
- * default value array('default' => 'Drupal\Core\Mail\PhpMail').
- * This module uses array('default' => 'SMTPMailSystem').
+ * transport layer, requires to change the mail_system variable's
+ * default value array('default-system' => 'DefaultMailSystem').
+ * This module uses array('default-system' => 'SmtpMailSystem').
  */
 
-use Drupal\Core\Routing\RouteMatchInterface;
+/**
+ * SMTP logging -- logging is disabled
+ */
+define('SMTP_LOGGING_NONE', 0);
+
+/**
+ * SMTP logging -- all messages are logged
+ */
+define('SMTP_LOGGING_ALL', 1);
+
+/**
+ * SMTP logging -- only errors are logged
+ */
+define('SMTP_LOGGING_ERRORS', 2);
+
 
 /**
  * Implements hook_help().
  */
-function smtp_help($route_name, RouteMatchInterface $route_match) {
-  switch ($route_name) {
-    case 'help.page.smtp':
+function smtp_help($path, $arg) {
+  switch ($path) {
+    case 'admin/help#smtp':
       return t('Allow for site emails to be sent through an SMTP server of your choice.');
   }
 }
@@ -32,12 +46,27 @@ function smtp_help($route_name, RouteMatchInterface $route_match) {
  */
 function smtp_menu() {
   $items['admin/config/system/smtp'] = array(
-    'title' => 'SMTP Authentication Support',
-    'description' => 'Allow for site emails to be sent through an SMTP server of your choice.',
-    'route_name' => 'smtp.config',
+    'title'            => 'SMTP Authentication Support',
+    'page callback'    => 'drupal_get_form',
+    'page arguments'   => array('smtp_admin_settings'),
+    'access arguments' => array('administer smtp module'),
+    'description'      => 'Allow for site emails to be sent through an SMTP server of your choice.',
+    'file'             => 'smtp.admin.inc',
   );
   return $items;
 }
+
+/**
+ * Implements hook_permission().
+ */
+function smtp_permission() {
+  return array(
+    'administer smtp module' => array(
+      'title' => t('Administer SMTP Authentication Support module'),
+      'description' => t('Perform administration tasks for SMTP Authentication Support module.'))
+  );
+}
+
 
 /**
  * Implements hook_mail().
@@ -50,15 +79,19 @@ function smtp_mail($key, &$message, $params) {
 }
 
 /**
- * Implementation of hook_queue_info().
+ * Implementation of hook_cron_queue_info().
  */
-function smtp_queue_info() {
+function smtp_cron_queue_info() {
   $queues['smtp_send_queue'] = array(
     'worker callback' => 'smtp_send_queue_runner',
-    'cron' => array(
-      'time' => 60, // This is the max run time per cron run in seconds.
-    ),
+    'time' => 60,
   );
+
+  $queues['smtp_failure_queue'] = array(
+    'worker callback' => 'smtp_failure_queue_runner',
+    'time' => 30,
+  );
+
   return $queues;
 }
 
@@ -66,30 +99,59 @@ function smtp_queue_info() {
  * smtp_send_queue queuer.
  */
 function smtp_send_queue($mailerObj) {
-  $queue = Drupal::queue('smtp_send_queue');
+  $queue = DrupalQueue::get('smtp_send_queue');
   $queue->createItem($mailerObj);
 }
 
-function smtp_send_queue_runner($variables) {
-  _smtp_mailer_send($variables);
-}
+function smtp_send_queue_runner($message) {
+  $logging = variable_get('smtp_debugging', SMTP_LOGGING_ERRORS);
 
-function _smtp_mailer_send($variables) {
-  $mailer = $variables['mailer'];
-  $to = $variables['to'];
-  $from = $variables['from'];
-
-  $logger = \Drupal::logger('smtp');
-
-  // Let the people know what is going on.
-  $logger->info('Sending mail to: @to', array('@to' => $to));
-
-  // Try to send e-mail. If it fails, set watchdog entry.
-  if (!$mailer->Send()) {
-    $logger->error('Error sending e-mail from @from to @to: @error_message', array('@from' => $from, '@to' => $to, '@error_message' => $mailer->ErrorInfo));
-    return FALSE;
+  // Legacy for mails queued before 7.x-v1.3
+  // What was passed to the runner used to be a PHPMailer object, not a message array.
+  if (!empty($message['mailer']) && is_object($message['mailer'])) {
+    if (!$message['mailer']->Send()) {
+      if ($logging == SMTP_LOGGING_ALL || $logging == SMTP_LOGGING_ERRORS) {
+        watchdog('smtp', 'Error sending e-mail from @from to @to, will retry on cron run : !error_message.',
+          array(
+            '@from' => $message['from'],
+            '@to' => $message['to'],
+            '!error_message' => $message['mailer']->ErrorInfo,
+          ), WATCHDOG_ERROR);
+      }
+    }
+    return;
   }
 
-  $mailer->SmtpClose();
-  return TRUE;
+  // Let the people know what is going on.
+  if ($logging == SMTP_LOGGING_ALL) {
+    watchdog('smtp', 'Sending mail to: @to', array('@to' => $message['to']));
+  }
+
+  // Send the message.
+  $mail_system = new SmtpMailSystem();
+  $mail_system->mailWithoutQueue($message);
+}
+
+/**
+ * Store failed messages for later.
+ *
+ * @param array $new_message
+ *
+ * @return array
+ *   All messages that have been saved.
+ */
+function smtp_failed_messages($message) {
+  $queue = DrupalQueue::get('smtp_failure_queue');
+  $queue->createItem($message);
+}
+
+/**
+ * Queue runner for smtp_failure_queue.
+ *
+ * @param $message
+ *   A drupal_mail-formatted message.
+ */
+function smtp_failure_queue_runner($message) {
+  $queue = DrupalQueue::get('smtp_send_queue');
+  $queue->createItem($message);
 }
